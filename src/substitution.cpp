@@ -7,6 +7,8 @@
 */
 /*------------------------------------------------------------------------*/
 #include <list>
+#include <vector>
+#include <algorithm>
 
 #include "substitution.h"
 /*------------------------------------------------------------------------*/
@@ -654,6 +656,27 @@ bool miter_to_file(FILE * file) {
   int *map, m, n;
   unsigned *refs, i, lit;
 
+  // A gate can be referenced by the miter without being added to it as an
+  // input or as an AND (seen on radix-4 Booth designs, where slit(0) is passed
+  // through as a single output in add_btor_adder). The clause count below then
+  // counts it like an AND (2 + 1 clauses) although no clauses are written for
+  // it, so the DIMACS header declares more clauses than the file contains.
+  // Declaring such literals as miter inputs makes the miter well-formed; they
+  // were unconstrained in the CNF anyway, so the formula is unchanged.
+  {
+    std::vector<unsigned> undef;
+    for (unsigned j = 0; j < miter->num_ands; j++) {
+      unsigned r[2] = {miter->ands[j].rhs0, miter->ands[j].rhs1};
+      for (int k = 0; k < 2; k++) {
+        unsigned l = aiger_strip(r[k]);
+        if (l < 2 || aiger_is_input(miter, l) || aiger_is_and(miter, l))
+          continue;
+        if (std::find(undef.begin(), undef.end(), l) == undef.end())
+          undef.push_back(l);
+      }
+    }
+    for (unsigned l : undef) aiger_add_input(miter, l, 0);
+  }
   aiger_reencode(miter);
 
   refs = reinterpret_cast<unsigned*>(calloc(2*(miter->maxvar+1), sizeof *refs));
