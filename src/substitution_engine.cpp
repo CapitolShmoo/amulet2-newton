@@ -6,7 +6,9 @@
   Copyright(C) 2020, 2021 Daniela Kaufmann, Johannes Kepler University Linz
 */
 /*------------------------------------------------------------------------*/
+#include <stdlib.h>
 #include "substitution_engine.h"
+#include "fsa_search.h"
 
 /*------------------------------------------------------------------------*/
 // ERROR CODES:
@@ -38,8 +40,34 @@ bool substitution(const char * out_f1, const char * out_f2) {
   init_time = process_time();
 
   bool res;
-
-  if (identify_final_stage_adder() && build_adder_miter()) {
+  // The final-stage-adder boundary step
+  // (identify_final_stage_adder + build_adder_miter + generate_rewritten_aig)
+  // is replaced by a search-based detector (fsa_search.cpp). The original
+  // code path is kept and selectable with the environment variable
+  // AMULET_STOCK_FSA=1.
+  if (!getenv("AMULET_STOCK_FSA")) {
+    if (fsa_search_substitute()) {
+      res = 1;
+      if (!fsa_search_miter_to_file(f1))
+        die(err_write_file, "failed to write miter to '%s'", out_f1);
+      else
+        msg("writing miter to %s", out_f1);
+      if (!fsa_search_write_rewritten(f2))
+        die(err_write_aig, "failed to write rewritten aig to '%s'", out_f2);
+      else
+        msg("writing rewritten aig to '%s'", out_f2);
+    } else {
+      res = 0;
+      if (!trivial_miter_to_file(f1))
+        die(err_write_file, "failed to write trivial miter to '%s'", out_f1);
+      else
+        msg("writing trivial miter to %s", out_f1);
+      if (!write_model(f2))
+        die(err_write_aig, "failed to write original aig to '%s'", out_f2);
+      else
+        msg("writing original aig to '%s'", out_f2);
+    }
+  } else if (identify_final_stage_adder() && build_adder_miter()) {
     res = 1;
 
     if (!miter_to_file(f1))

@@ -19,6 +19,8 @@
 #include "nss.h"
 #include "pac.h"
 #include "slicing.h"
+void booth_guard_begin();
+void booth_guard_end();
 /*------------------------------------------------------------------------*/
 // / 1 for pac
 // / 2 for hybrid

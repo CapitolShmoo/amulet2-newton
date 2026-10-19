@@ -93,4 +93,5 @@ void clean_slices();
 */
 void slicing_non_xor();
 
+int assign_unassigned_gates_to_slices();
 #endif  // AMULET2_SRC_SLICING_H_

@@ -103,7 +103,31 @@ bool verify(const char * inp_f, const char * out_f1,
     remove_single_occs_gates(f2);
 
     xor_slicing_failure = slicing_xor();
-    if(!xor_slicing_failure) remove_slice_minus_one_gates(f2);
+    if(!xor_slicing_failure) {
+      // Order of the unassigned-gate step, in -verify mode (proof == 0) only.
+      //   AMULET_ORDER=stock (or AMULET_STOCK_ORDER=1): stock step
+      //     (substitute unassigned gates into their parents).
+      //   AMULET_ORDER=new: keep unassigned gates as separate constraints
+      //     (assign_unassigned_gates_to_slices).
+      //   default: stock step with a guard on designs where AMulet detected
+      //     Booth recoding: if the step produces a constraint with more than
+      //     AMULET_GUARD_SIZE terms (default 2048; optional CPU trigger
+      //     AMULET_GUARD_CPU, off by default), the process re-executes itself
+      //     with AMULET_ORDER=new (CPU time keeps accumulating against the
+      //     caller's limit).
+      const char * ord = getenv("AMULET_ORDER");
+      bool stock_only = (ord && !strcmp(ord, "stock")) ||
+                        getenv("AMULET_STOCK_ORDER");
+      bool new_order = ord && !strcmp(ord, "new");
+      if (!proof && new_order) {
+        if (assign_unassigned_gates_to_slices() < 0)
+          remove_slice_minus_one_gates(f2);
+      } else if (!proof && !stock_only) {
+        booth_guard_begin();
+        remove_slice_minus_one_gates(f2);
+        booth_guard_end();
+      } else remove_slice_minus_one_gates(f2);
+    }
     else clean_slices();
   }
 

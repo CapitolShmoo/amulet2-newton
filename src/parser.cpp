@@ -98,6 +98,7 @@ void init_aiger_with_checks() {
 /*------------------------------------------------------------------------*/
 
 void parse_aig(const char * input_name) {
+  input_aig_name = input_name;
   init_aig_parsing();
 
   msg("reading '%s'", input_name);

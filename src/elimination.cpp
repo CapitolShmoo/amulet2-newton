@@ -11,6 +11,9 @@
 /*------------------------------------------------------------------------*/
 #include <algorithm>
 #include <list>
+#include <unistd.h>
+#include <vector>
+#include <cstring>
 
 #include "elimination.h"
 /*------------------------------------------------------------------------*/
@@ -39,6 +42,81 @@ static std::vector<int> spec_indices;
 // / used to collect the specification of each slice for PAC proofs
 static std::vector<Polynomial*> spec_of_slice;
 
+/*-------------------------------------------------------------------------*/
+// Booth guard for the unassigned-gate step in -verify mode
+// (see polynomial_solver.cpp).
+extern bool gen_witness;
+// sum of the sizes of all constraints produced in the guarded phase
+static size_t guard_phase_work = 0;
+static int guard_active = 0;
+static double guard_start = 0, guard_cpu = 0.25;
+static size_t guard_size = 2048;
+void booth_guard_begin() {
+  // Guard only on designs where AMulet itself detected Booth recoding
+  // (gate.cpp `booth`): trip if one substituted constraint exceeds
+  // AMULET_GUARD_SIZE terms (default 2048). An optional CPU-time trigger
+  // (AMULET_GUARD_CPU seconds) is off by default.
+  const char * g = getenv("AMULET_GUARD_CPU");
+  guard_cpu = g ? atof(g) : 1e30;
+  const char * gs = getenv("AMULET_GUARD_SIZE");
+  guard_size = gs ? strtoul(gs, 0, 10) : 2048;
+  guard_phase_work = 0; guard_active = booth ? 1 : 0;
+  guard_start = process_time();
+}
+void booth_guard_end() {
+  guard_active = 0;
+}
+static void booth_guard_trip(size_t sz) {
+  // Before giving up the stock order, look for a bug by random simulation
+  // (2048 vectors): on a buggy design the stock order may still finish
+  // quickly while the reordered run does not.
+  // AMULET_NO_SIMCHECK=1 disables this check.
+  if (!getenv("AMULET_NO_SIMCHECK")) {
+    std::vector<char> cex;
+    double t0 = process_time();
+    if (sim_check_multiplier(32, 2026101908ULL, cex)) {
+      msg("Booth guard tripped; random simulation found a differing "
+          "input vector (%.3f s)", process_time() - t0);
+      msg("INCORRECT MULTIPLIER");
+      msg("");
+      if (input_aig_name && gen_witness) {
+        char witness_name[256];
+        snprintf(witness_name, sizeof(witness_name), "%s", input_aig_name);
+        char * dot = strrchr(witness_name, '.');
+        if (dot) *dot = 0;
+        strncat(witness_name, ".cex",
+                sizeof(witness_name) - strlen(witness_name) - 1);
+        FILE * f = fopen(witness_name, "w");
+        if (f) {
+          fwrite(cex.data(), 1, cex.size(), f);
+          fprintf(f, "\n.\n");
+          fclose(f);
+          msg("Counter example (simulation) written to %s", witness_name);
+        }
+      }
+      fflush(stdout);
+      exit(0);
+    }
+    msg("Booth guard tripped; random simulation (2048 vectors, %.3f s) "
+        "found no differing vector", process_time() - t0);
+  }
+  msg("Booth design, unassigned-gate substitution exceeded the guard "
+      "(size %zu terms or %.2f s CPU; work %zu terms); "
+      "re-running with AMULET_ORDER=new", guard_size, guard_cpu, sz);
+  fflush(stdout);
+  static char buf[1 << 16];
+  FILE * f = fopen("/proc/self/cmdline", "r");
+  if (!f) return;
+  size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  buf[n] = 0;
+  std::vector<char*> argv;
+  for (size_t i = 0; i < n; i += strlen(buf + i) + 1) argv.push_back(buf + i);
+  argv.push_back(0);
+  setenv("AMULET_ORDER", "new", 1);
+  execv("/proc/self/exe", argv.data());
+  msg("re-exec failed, continuing with the stock step");
+}
 /*-------------------------------------------------------------------------*/
 
 Polynomial * add_up_factors(FILE * file, bool print) {
@@ -168,6 +246,12 @@ void eliminate_by_one_gate(Gate * n1, Gate *n2, FILE * file) {
   delete(negfactor);
   delete(p1);
   n1->set_gate_constraint(rem);
+  if (guard_active && rem) {
+    guard_phase_work += rem->size();
+    if (rem->size() > guard_size ||
+        process_time() - guard_start > guard_cpu)
+      booth_guard_trip(guard_phase_work);
+  }
 }
 
 /*------------------------------------------------------------------------*/

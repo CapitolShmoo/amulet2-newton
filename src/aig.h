@@ -38,6 +38,12 @@ extern aiger * miter;
 // / Will be printed to the provided output file.
 extern aiger * rewritten;
 
+// random-simulation bug check (see aig.cpp)
+#include <vector>
+extern const char * input_aig_name;
+int sim_check_multiplier(unsigned rounds, unsigned long long seed,
+                         std::vector<char> & cex);
+
 /*------------------------------------------------------------------------*/
 
 /**

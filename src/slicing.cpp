@@ -445,6 +445,48 @@ void fix_jut_gates() {
 }
 
 /*------------------------------------------------------------------------*/
+// AMULET_ORDER=new: instead of substituting gates that XOR-based slicing
+// left unassigned into all their parents (remove_slice_minus_one_gates),
+// keep them as separate gate constraints. Each one goes into the smallest
+// slice of its parents, right after its last parent there; children that
+// would then be reduced too early are moved with
+// move_inserted_children_from_larger_slices. Gates are processed from the
+// highest index down (parents before children). A zero remainder is still an
+// ideal-membership certificate whatever the order; a bad order can only leave
+// non-input variables in the remainder (AMulet then stops with a
+// slicing-failure error, which callers treat as not decided).
+int assign_unassigned_gates_to_slices() {
+  int counter = 0;
+  for (int i = (int) M-2; i >= (int) NN; i--) {
+    Gate * n = gates[i];
+    if (!n || n->get_elim() || n->get_input()) continue;
+    if (n->get_slice() > -1) continue;
+    int s = -1;
+    for (auto it = n->parents_begin(); it != n->parents_end(); ++it) {
+      Gate * p = *it;
+      if (p->get_elim()) continue;
+      if (p->get_slice() < 0) return -1;
+      if (s < 0 || p->get_slice() < s) s = p->get_slice();
+    }
+    if (s < 0) continue;  // dangling, never used in reduction
+    auto pos = slices[s].begin();
+    auto last = slices[s].end();
+    for (auto it = slices[s].begin(); it != slices[s].end(); ++it)
+      if (n->is_in_parents(*it)) last = it;
+    if (last == slices[s].end()) return -1;
+    pos = last; ++pos;
+    n->set_slice(s);
+    auto ins = slices[s].insert(pos, n);
+    ++ins;
+    move_inserted_children_from_larger_slices(n, ins);
+    counter++;
+    if (verbose >= 3) msg("assigned %s to slice %i", n->get_var_name(), s);
+  }
+  msg("assigned %i unassigned gates to slices", counter);
+  return counter;
+}
+
+/*------------------------------------------------------------------------*/
 
 bool slicing_xor() {
 
